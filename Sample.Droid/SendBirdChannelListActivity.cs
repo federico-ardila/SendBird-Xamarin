@@ -13,8 +13,8 @@ using Android.Views;
 using Android.Widget;
 
 using SendBird;
-using SendBird.Model;
-using SendBird.Query;
+using SendBird.SBJson;
+
 
 using Sample.Droid;
 using System.IO;
@@ -81,9 +81,9 @@ namespace SendBirdSample.Droid
 		private void InitFragment(Bundle savedInstanceState, string channelUrl) 
 		{
 			mSendBirdChannelListFragment = new SendBirdChannelListFragment(channelUrl);
-			mSendBirdChannelListFragment.OnChannelSelected += (sender, e) => {
+			mSendBirdChannelListFragment.OnChannelSelected += (sender, channel) => {
 				Intent data = new Intent();
-				data.PutExtra("channelUrl", e.Channel.url);
+				data.PutExtra("channelUrl", channel.Url);
 				SetResult(Android.App.Result.Ok, data);
 				Finish();
 			};
@@ -105,7 +105,7 @@ namespace SendBirdSample.Droid
 			mBtnSettings.Click += (sender, e) => {
 				var builder = new Android.App.AlertDialog.Builder (this);
 				builder.SetTitle ("SendBird");
-				builder.SetMessage("SendBird In App version " + SendBird.CommonVar.VERSION);
+				builder.SetMessage("SendBird In App version " + SendBirdClient.SDKVersion);
 				builder.SetPositiveButton ("OK", (sender_child, e_child) => {
 				});
 
@@ -125,10 +125,21 @@ namespace SendBirdSample.Droid
 
 			String appId = extras.GetString("appId");
 			String uuid = extras.GetString("uuid");
-			String userName = extras.GetString("userName");
+            String accessToken = extras.GetString("accessToken");
+            String userName = extras.GetString("userName");
+
 			
-			SendBirdSDK.Init(appId);
-			SendBirdSDK.Login(uuid, userName);
+			SendBirdClient.Init(appId);
+            SendBirdClient.Connect(uuid, accessToken, (user, e) =>
+            {
+                if (e != null)
+                {
+                    Console.WriteLine(e.Message);
+                    return;
+                }
+
+
+            });
 		}
 
 		private void ResizeMenubar()
@@ -150,13 +161,13 @@ namespace SendBirdSample.Droid
 
 		public class SendBirdChannelListFragment : Fragment 
 		{
-			public delegate void OnChannelSelectedEvent(object sender, ChannelEventArgs e);
+			public delegate void OnChannelSelectedEvent(object sender, OpenChannel channel);
 			public OnChannelSelectedEvent OnChannelSelected;
 
 			private string mChannelUrl;
 			private ListView mListView;
-			private ChannelListQuery mChannelListQuery;
-			private ChannelListQuery mChannelListSearchQuery;
+			private OpenChannelListQuery mChannelListQuery;
+			private OpenChannelListQuery mChannelListSearchQuery;
 			private SendBirdChannelAdapter mCurrentAdapter;
 			private SendBirdChannelAdapter mAdapter;
 			private SendBirdChannelAdapter mSearchAdapter;
@@ -175,11 +186,16 @@ namespace SendBirdSample.Droid
 			{
 				View rootView = inflater.Inflate(Resource.Layout.SendBirdFragmentChannelList, container, false);
 				InitUIComponents(rootView);
-				mChannelListQuery = SendBirdSDK.QueryChannelList ();
-				mChannelListQuery.OnResult += (sender, e) =>  {
-					mAdapter.AddAll(e.Channels);
-				};
-				mChannelListQuery.Next (); // actually query to get channel list via API Client
+				mChannelListQuery = OpenChannel.CreateOpenChannelListQuery();
+                mChannelListQuery.Next((List<OpenChannel> channels, SendBirdException e) => {
+                    if (e != null)
+                    {
+                        // Error.
+                        return;
+                    }
+                    mAdapter.AddAll(channels);
+
+                });
 
 				ShowChannelList();
 
@@ -190,19 +206,20 @@ namespace SendBirdSample.Droid
 			{
 				if(mCurrentAdapter == mAdapter) {
 					if(mChannelListQuery != null && mChannelListQuery.HasNext() && !mChannelListQuery.IsLoading()) {
-						mChannelListQuery.OnResult += (sender, e) => {
-							mAdapter.AddAll(e.Channels);
-							mAdapter.NotifyDataSetChanged();
-						};
-						mChannelListQuery.Next ();
-					}
+                        mChannelListQuery.Next((channels, e) =>
+                        {
+                            mAdapter.AddAll(channels);
+                            mAdapter.NotifyDataSetChanged();
+                        });
+
+
+                    }
 				} else if(mCurrentAdapter == mSearchAdapter) {
 					if(mChannelListSearchQuery != null && mChannelListSearchQuery.HasNext() && !mChannelListSearchQuery.IsLoading()) {
-						mChannelListSearchQuery.OnResult += (sender, e) => {
-							mSearchAdapter.AddAll(e.Channels);
-							mSearchAdapter.NotifyDataSetChanged();
-						};
-						mChannelListSearchQuery.Next ();
+						mChannelListSearchQuery.Next ((channels, e)=> {
+                            mSearchAdapter.AddAll(channels);
+                            mSearchAdapter.NotifyDataSetChanged();
+                        });
 					}
 				}
 			}
@@ -226,9 +243,9 @@ namespace SendBirdSample.Droid
 				mAdapter = new SendBirdChannelAdapter(this.Activity);
 				mSearchAdapter = new SendBirdChannelAdapter (this.Activity);
 				mListView.ItemClick += (sender, e) => {
-					Channel channel = mCurrentAdapter[e.Position];
+					OpenChannel channel = mCurrentAdapter[e.Position];
 					if(OnChannelSelected != null) {
-						OnChannelSelected(this, new ChannelEventArgs(channel));
+						OnChannelSelected(this, channel);
 					}
 				};
 
@@ -278,27 +295,33 @@ namespace SendBirdSample.Droid
 
 				ShowSearchList ();
 
-				mChannelListSearchQuery = SendBirdSDK.QueryChannelList(keyword);
-				mChannelListSearchQuery.OnResult += (sender, e) => {
-					mSearchAdapter.Clear();
-					mSearchAdapter.AddAll(e.Channels);
-					mSearchAdapter.NotifyDataSetChanged();
-					if(e.Channels.Count <= 0) {
-						Toast.MakeText(this.Activity, "No channels were found.", ToastLength.Short).Show();
-					}
-				};
-				mChannelListSearchQuery.Next ();
+                mChannelListSearchQuery = OpenChannel.CreateOpenChannelListQuery();
+                mChannelListSearchQuery.NameKeyword = keyword;
+                mChannelListQuery.Next((List<OpenChannel> channels, SendBirdException e) => {
+                    if (e != null)
+                    {
+                        // Error.
+                        return;
+                    }
+                    mSearchAdapter.Clear();
+                    mAdapter.AddAll(channels);
+                    mSearchAdapter.NotifyDataSetChanged();
+                    if (channels.Count <= 0)
+                    {
+                        Toast.MakeText(this.Activity, "No channels were found.", ToastLength.Short).Show();
+                    }
+                });
 			}
 
-			public class SendBirdChannelAdapter : BaseAdapter<Channel>
+			public class SendBirdChannelAdapter : BaseAdapter<OpenChannel>
 			{
 				private LayoutInflater mInflater;
-				private List<Channel> mItemList;
+				private List<OpenChannel> mItemList;
 
 				public SendBirdChannelAdapter (Context context)
 				{
 					mInflater = context.GetSystemService (Context.LayoutInflaterService) as LayoutInflater;
-					mItemList = new List<Channel> ();
+					mItemList = new List<OpenChannel> ();
 				}
 
 				#region implemented abstract members of BaseAdapter
@@ -315,14 +338,14 @@ namespace SendBirdSample.Droid
 					}
 				}
 
-				public override Channel this [int index]
+				public override OpenChannel this [int index]
 				{
 					get {
 						return mItemList [index];
 					}
 				}
 
-				public void Add(Channel channel)
+				public void Add(OpenChannel channel)
 				{
 					mItemList.Add(channel);
 					mSyncContext.Post (delegate {
@@ -330,7 +353,7 @@ namespace SendBirdSample.Droid
 					}, null);
 				}
 
-				public void AddAll(List<Channel> channels)
+				public void AddAll(List<OpenChannel> channels)
 				{
 					mItemList.AddRange(channels);
 					mSyncContext.Post (delegate {
@@ -360,15 +383,15 @@ namespace SendBirdSample.Droid
 						convertView.Tag = viewHolder;
 					}
 
-					Channel item = this[position];
+                    OpenChannel item = this[position];
 					viewHolder = convertView.Tag as ViewHolder;
 
-					DisplayUrlImage(viewHolder.GetView<ImageView> ("img_thumbnail"), item.coverUrl);
+					DisplayUrlImage(viewHolder.GetView<ImageView> ("img_thumbnail"), item.CoverUrl);
 
-					viewHolder.GetView<TextView> ("txt_topic").Text = "#" + item.GetUrlWithoutAppPrefix();
-					viewHolder.GetView<TextView> ("txt_desc").Text = ("" + item.memberCount + ((item.memberCount <= 1) ? " Member" : " Members"));
+					viewHolder.GetView<TextView> ("txt_topic").Text = "#" + item.Url;
+					viewHolder.GetView<TextView> ("txt_desc").Text = ("" + item.ParticipantCount + ((item.ParticipantCount <= 1) ? " Member" : " Members"));
 
-					if(item.url.Equals(SendBirdSDK.GetChannelUrl())) {
+					if(item.Url.Equals("rootlio1")) { //Whatever
 						viewHolder.GetView("selected_container").Visibility = ViewStates.Visible;
 					} else {
 						viewHolder.GetView("selected_container").Visibility = ViewStates.Gone;

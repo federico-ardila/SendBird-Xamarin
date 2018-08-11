@@ -20,8 +20,7 @@ using Android.Views;
 using Android.Widget;
 
 using SendBird;
-using SendBird.Model;
-using SendBird.Query;
+using SendBird.SBJson;
 
 using Sample.Droid;
 
@@ -49,12 +48,15 @@ namespace SendBirdSample.Droid
 		private string mChannelUrl;
 		private bool mDoNotDisconnect;
 
-		public static Bundle MakeSendBirdArgs (string appId, string uuid, string userName, string channelUrl)
+        public const string HANDLER_ID = "DEFAULT_EVENT_HANDLER";
+
+		public static Bundle MakeSendBirdArgs (string appId, string uuid, string userName, string channelUrl, string accessToken)
 		{
 			Bundle args = new Bundle ();
 			args.PutString ("appId", appId);
 			args.PutString ("uuid", uuid);
-			args.PutString ("userName", userName);
+            args.PutString("accessToken", accessToken);
+            args.PutString ("userName", userName);
 			args.PutString ("channelUrl", channelUrl);
 			return args;
 		}
@@ -63,7 +65,9 @@ namespace SendBirdSample.Droid
 		{
 			base.OnDestroy ();
 			if (!mDoNotDisconnect) {
-				SendBirdSDK.Disconnect ();
+				SendBirdClient.Disconnect (()=> {
+                    //Log something for example
+                });
 			}
 		}
 
@@ -74,7 +78,8 @@ namespace SendBirdSample.Droid
 
 		private void InitFragment (Bundle savedInstanceState)
 		{
-			mSendBirdChatFragment = new SendBirdChatFragment ();
+            mChannelUrl = Intent.Extras.GetString("channelUrl");
+            mSendBirdChatFragment = new SendBirdChatFragment (mChannelUrl);
 
 			mSendBirdChatAdapter = new SendBirdChatAdapter (this);
 			mSendBirdChatFragment.mAdapter = mSendBirdChatAdapter;
@@ -98,10 +103,10 @@ namespace SendBirdSample.Droid
 			mSettingsContainer.Visibility = ViewStates.Gone;
 
 			mBtnLeave = FindViewById (Resource.Id.btn_leave) as Button;
-			mBtnLeave.Click += (sender, e) => {
+			mBtnLeave.Click += async (sender, e) => {
 				mSettingsContainer.Visibility = ViewStates.Gone;
-				SendBirdSDK.Leave(SendBirdSDK.GetChannelUrl());
-				Finish();
+                await ExitChannelAsync();
+                Finish();
 			};
 
 			mBtnClose = FindViewById (Resource.Id.btn_close) as ImageButton;
@@ -120,7 +125,7 @@ namespace SendBirdSample.Droid
 			ResizeMenubar ();
 		}
 
-		private void ResizeMenubar()
+        private void ResizeMenubar()
 		{
 			ViewGroup.LayoutParams lp = mTopBarContainer.LayoutParameters;
 			if(Resources.Configuration.Orientation == Android.Content.Res.Orientation.Landscape) {
@@ -137,77 +142,157 @@ namespace SendBirdSample.Droid
 			ResizeMenubar ();
 		}
 
-		private void InitSendBird (Bundle extras)
+		private async Task InitSendBirdAsync (Bundle extras)
 		{
 			string appId = extras.GetString ("appId");
 			string uuid = extras.GetString ("uuid");
 			string userName = extras.GetString ("userName");
+            string accessToken = extras.GetString("accessToken");
 			mChannelUrl = extras.GetString ("channelUrl");
 
 			mSyncContext = SynchronizationContext.Current; // required for ui update
-			#region SendBirdEventHandler
-
-			SendBirdEventHandler seh = new SendBirdEventHandler ();
-			seh.OnConnect += (sender, e) => {
-				Channel channel = e.Channel;
-				mSyncContext.Post (delegate {
-					mTxtChannelUrl.Text = "#" + mChannelUrl;
-					mSendBirdChatAdapter.NotifyDataSetChanged ();
-				}, null);
-			};
-			seh.OnError += (sender, e) => {
-			};
-			seh.OnChannelLeft += (sender, e) => {
-			};
-			seh.OnMessageReceived += (sender, e) => {
-				mSendBirdChatAdapter.AddMessageModel (e.Message);
-				mSyncContext.Post (delegate {
-					mSendBirdChatAdapter.NotifyDataSetChanged ();
-				}, null);
-			};
-			seh.OnBroadcastMessageReceived += (sender, e) => {
-				mSendBirdChatAdapter.AddMessageModel(e.Message);
-				mSyncContext.Post (delegate {
-					mSendBirdChatAdapter.NotifyDataSetChanged ();
-				}, null);
-			};
-			seh.OnSystemMessageReceived += (sender, e) => {
-				mSendBirdChatAdapter.AddMessageModel(e.Message);
-				mSyncContext.Post (delegate {
-					mSendBirdChatAdapter.NotifyDataSetChanged ();
-				}, null);
-			};
-			seh.OnFileReceived += (sender, e) => {
-				mSendBirdChatAdapter.AddMessageModel(e.FileLink);
-				mSyncContext.Post (delegate {
-					mSendBirdChatAdapter.NotifyDataSetChanged ();
-				}, null);
-			};
-			seh.OnAllDataReceived += (sender, e) => {
-				mSyncContext.Post (delegate {
-					mSendBirdChatAdapter.NotifyDataSetChanged();
-					mSendBirdChatFragment.mListView.SetSelection(mSendBirdChatAdapter.Count);
-				}, null);
-			};
-			seh.OnMessageDelivery += (sender, e) => {
-				if(!e.Sent) {
-					mSyncContext.Post (delegate {
-						mSendBirdChatFragment.mEtxtMessage.Text = e.Message;
-					}, null);
-				}
-			};
-			seh.OnMessagingEnded += (sender, e) => {
-			};
-			seh.OnSystemEventReceived += (sender, e) => {
-			};
 
 
-			#endregion
+            #region ChannelHandler
+            SendBirdClient.ChannelHandler ch = new SendBirdClient.ChannelHandler();
+            ch.OnMessageReceived = OnMessageReceived;
+            ch.OnMessageDeleted = OnMessageDeleted;
+            #endregion
 
-			SendBirdSDK.Init (appId);
-			SendBirdSDK.Login (uuid, userName);
-			SendBirdSDK.SetEventHandler (seh);
+            try
+            {
+                SendBirdClient.Init(appId);
+                await ConnectAsync(uuid, accessToken);
+                mTxtChannelUrl.Text = "#" + mChannelUrl;
+                mSendBirdChatAdapter.NotifyDataSetChanged();
+                await JoinChatAsync();
+            }catch(Exception e)
+            {
+                Console.WriteLine("Error Connection - " + e.Message);
+            }
+
+			SendBirdClient.AddChannelHandler(HANDLER_ID, ch);
 		}
+
+        private Task<User> ConnectAsync(string userId, string accessToken)
+        {
+            var t = new TaskCompletionSource<User>();
+            SendBirdClient.Connect(userId, accessToken, (user, e) =>
+            {
+                if (e != null)
+                {
+                    t.TrySetException(e);
+                    return;
+                }
+                t.TrySetResult(user);
+            }); 
+            return t.Task;
+        }
+
+
+        private Task<OpenChannel> GetChannelByUrlAsync(string channelUrl)
+        {
+            var t = new TaskCompletionSource<OpenChannel>();
+            OpenChannel.GetChannel(channelUrl, (channel, e) =>
+            {
+                if (e != null)
+                {
+                    t.TrySetException(e);
+                    return;
+                }
+                t.TrySetResult(channel);
+            });
+
+            return t.Task;
+        }
+        private OpenChannel channel;
+        private async Task<OpenChannel> GetChannelAsync()
+        {
+            if (channel == null)
+            {
+                channel = await GetChannelByUrlAsync(mChannelUrl);
+            }
+
+            return channel;
+        }
+        private Task<List<BaseMessage>> GetPreviousMessagesAsync(BaseChannel channel,int limit)
+        {
+            var t = new TaskCompletionSource<List<BaseMessage>>();
+            var q = channel.CreatePreviousMessageListQuery();
+            q.Load(limit, false, (messages, e) =>
+             {
+                 if (e != null)
+                 {
+                     t.TrySetException(e);
+                     return;
+                 }
+                 t.TrySetResult(messages);
+             });
+            return t.Task;
+        }
+        private async Task<List<BaseMessage>> GetPreviousMessagesAsync(int limit)
+        {
+            var channel = await GetChannelAsync();
+            return await GetPreviousMessagesAsync(channel, limit);
+        }
+        private Task EnterChannelAsync(OpenChannel channel)
+        {
+            var t = new TaskCompletionSource<bool>();
+            channel.Enter(e =>
+            {
+                if (e != null)
+                {
+                    t.SetException(e);
+                    return;
+                }
+                t.SetResult(true);
+            });
+            return t.Task;
+        }
+        private async Task EnterChannelAsync()
+        {
+            var channel = await GetChannelAsync();
+            await EnterChannelAsync(channel);
+        }
+
+        private Task ExitChannelAsync(OpenChannel channel)
+        {
+            var t = new TaskCompletionSource<bool>();
+            channel.Exit(e =>
+            {
+                if (e != null)
+                {
+                    t.SetException(e);
+                    return;
+                }
+                t.SetResult(true);
+            });
+            return t.Task;
+        }
+        private async Task ExitChannelAsync()
+        {
+            var channel = await GetChannelAsync();
+            await ExitChannelAsync(channel);
+        }
+
+
+        private void  OnMessageReceived(BaseChannel BaseChannel, BaseMessage baseMessage)
+        {
+            mSendBirdChatAdapter.AddMessage(baseMessage);
+            mSyncContext.Post(delegate
+            {
+                mSendBirdChatAdapter.NotifyDataSetChanged();
+            }, null);
+        }
+
+        private void OnMessageDeleted(BaseChannel baseChannel , long messageId )
+        {
+            mSendBirdChatAdapter.DeleteMessage(baseChannel, messageId);
+            mSyncContext.Post(delegate
+            {
+                mSendBirdChatAdapter.NotifyDataSetChanged();
+            }, null);
+        }
 
 		protected override void OnActivityResult (int requestCode, Android.App.Result resultCode, Intent data)
 		{
@@ -220,23 +305,9 @@ namespace SendBirdSample.Droid
 					mSendBirdChatAdapter.Clear ();
 					mSendBirdChatAdapter.NotifyDataSetChanged ();
 
-					mMessageListQuery = SendBirdSDK.QueryMessageList (mChannelUrl);
-					mMessageListQuery.OnResult += (sender, e) => {
-						// mSyncContext.Post for RunOnUIThread
-						mSyncContext.Post (delegate {
-							foreach (var messageModel in e.Messages) {
-								mSendBirdChatAdapter.AddMessageModel (messageModel);
-							}
+                    JoinChatAsync();
 
-							mSendBirdChatAdapter.NotifyDataSetChanged ();
-							mSendBirdChatFragment.mListView.SetSelection (mSendBirdChatAdapter.Count);
-
-							SendBirdSDK.Join (mChannelUrl);
-							SendBirdSDK.Connect (mSendBirdChatAdapter.GetMaxMessageTimestamp());
-						}, null);
-					};
-					mMessageListQuery.Prev (long.MaxValue, 50); // Excute Query
-				}
+                }
 			}
 		}
 
@@ -250,25 +321,28 @@ namespace SendBirdSample.Droid
 
 			InitFragment (savedInstanceState);
 			InitUIComponents ();
-			InitSendBird (this.Intent.Extras);
-
-			mMessageListQuery = SendBirdSDK.QueryMessageList (mChannelUrl);
-			mMessageListQuery.OnResult += (sender, e) => {
-				// mSyncContext.Post for RunOnUIThread
-				mSyncContext.Post (delegate {
-					foreach (var messageModel in e.Messages) {
-						mSendBirdChatAdapter.AddMessageModel (messageModel);
-					}
-
-					mSendBirdChatFragment.mAdapter.NotifyDataSetChanged ();
-					mSendBirdChatFragment.mListView.SetSelection (mSendBirdChatAdapter.Count);
-
-					SendBirdSDK.Join (mChannelUrl);
-					SendBirdSDK.Connect (mSendBirdChatAdapter.GetMaxMessageTimestamp());
-				}, null);
-			};
-			mMessageListQuery.Prev (long.MaxValue, 50); // Excute Query
+			InitSendBirdAsync (this.Intent.Extras);
+            
 		}
+
+        private async Task JoinChatAsync()
+        {
+            try
+            {
+                var messages = await GetPreviousMessagesAsync(50);
+                mSendBirdChatAdapter.AddPreviousMessages(messages);
+                mSendBirdChatAdapter.NotifyDataSetChanged();
+                mSendBirdChatFragment.mListView.SetSelection(mSendBirdChatAdapter.Count);
+                await EnterChannelAsync();
+                
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine("Error joining chat - " + e.Message);
+            }
+
+
+        }
 
 		public class SendBirdChatFragment : Fragment
 		{
@@ -281,14 +355,45 @@ namespace SendBirdSample.Droid
 			public ImageButton mBtnChannel;
 			public ImageButton mBtnUpload;
 			public ProgressBar mProgressBtnUpload;
+            private readonly string _channelUrl;
 
 			public delegate void OnChannelListClickedEvent (object sender, EventArgs e);
 
 			public OnChannelListClickedEvent OnChannelListClicked;
 
-			public SendBirdChatFragment ()
+			public SendBirdChatFragment (string channelUrl)
 			{
-			}
+                _channelUrl = channelUrl;
+            }
+
+                        private OpenChannel _channel;
+            private Task<OpenChannel> GetChannelTask()
+            {
+                if(_channel != null)
+                {
+                    return Task.FromResult<OpenChannel>(_channel);
+                }
+                
+
+                var t = new TaskCompletionSource<OpenChannel>();
+                OpenChannel.GetChannel(_channelUrl, (channel, e) =>
+                {
+                    if (e != null)
+                    {
+                        t.TrySetException(e);
+                        return;
+                    }
+                    _channel = channel;
+                    t.TrySetResult(channel);
+                });
+
+                return t.Task;
+            }
+            private async Task<OpenChannel> GetChannelAsync()
+            {
+                return await GetChannelTask();
+            }
+			
 
 			public override View OnCreateView (LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState)
 			{
@@ -319,11 +424,10 @@ namespace SendBirdSample.Droid
 				};
 				mProgressBtnUpload = rootView.FindViewById (Resource.Id.progress_btn_upload) as ProgressBar;
 				mEtxtMessage = rootView.FindViewById (Resource.Id.etxt_message) as EditText;
-				mEtxtMessage.KeyPress += (object sender, View.KeyEventArgs e) => {
+				mEtxtMessage.KeyPress += async (object sender, View.KeyEventArgs e) => {
 					if (e.KeyCode == Keycode.Enter) {
 						if (e.Event.Action == KeyEventActions.Down) {
-							Send ();
-
+                            await SendAsync();
 							e.Handled = true;
 						}
 					} else {
@@ -332,8 +436,8 @@ namespace SendBirdSample.Droid
 				};
 
 				mBtnSend.Enabled = false;
-				mBtnSend.Click += (object sender, EventArgs e) => {
-					Send ();
+				mBtnSend.Click += async (object sender, EventArgs e) => {
+					await SendAsync ();
 				};
 
 				mEtxtMessage.AfterTextChanged += (object sender, AfterTextChangedEventArgs e) => {
@@ -346,19 +450,30 @@ namespace SendBirdSample.Droid
 				mListView.ScrollStateChanged += (s, args) => {
 					if(args.ScrollState == ScrollState.Idle) {
 						if(args.View.FirstVisiblePosition == 0 && args.View.ChildCount > 0 && args.View.GetChildAt(0).Top == 0) {
-							var mMessageListQuery = SendBirdSDK.QueryMessageList (SendBirdSDK.GetChannelUrl());
-							mMessageListQuery.OnResult += (sender, e) => {
-								// mSyncContext.Post for RunOnUIThread
-								mSyncContext.Post (delegate {
-									foreach (var messageModel in e.Messages) {
-										mAdapter.AddMessageModel (messageModel);
-									}
+                            OpenChannel.GetChannel(_channelUrl, (channel, e) =>
+                            {
+                                if (e != null)
+                                {
+                                    //Error
+                                    return;
+                                }
+                                var messagesQuery = channel.CreatePreviousMessageListQuery();
+                                messagesQuery.Load(30, false, (messages, e2) =>
+                                {
+                                    if (e2 != null)
+                                    {
+                                        //Error
+                                        return;
+                                    }
+                                    mAdapter.AddPreviousMessages(messages);
 
-									mAdapter.NotifyDataSetChanged ();
-									mListView.SetSelection (e.Messages.Count);
-								}, null);
-							};
-							mMessageListQuery.Prev (mAdapter.GetMinMessageTimestamp(), 30); // Excute Query
+                                    mAdapter.NotifyDataSetChanged();
+                                    mListView.SetSelection(messages.Count);
+                                });
+
+                            });
+
+
 						}
 					}
 				};
@@ -383,60 +498,110 @@ namespace SendBirdSample.Droid
 				listView.CacheColorHint = Color.ParseColor("#000000"); // For Gingerbread scrolling bug fix
 			}
 
-			private void Send ()
-			{
-				SendBirdSDK.SendMessage (mEtxtMessage.Text.ToString ());
-				mEtxtMessage.Text = string.Empty;
-			}
+            private async Task<BaseMessage> SendUserMessageAsync(string messageText)
+            {
+                var channel = await GetChannelAsync();
+                return await SendUserMessageTask(channel, messageText);
+            }
+            private Task<BaseMessage> SendUserMessageTask(OpenChannel channel, string messageText)
+            {
+                var t = new TaskCompletionSource<BaseMessage>();
+                channel.SendUserMessage(messageText, (message, e) =>
+                {
+                    if (e != null)
+                    {
+                        t.TrySetException(e);
+                        return;
+                    }
+                    t.TrySetResult(message);
+                });
+                return t.Task;
+            }
 
-			public override void OnActivityResult(int requestCode, int resultCode, Intent data)
+
+            private async Task SendAsync()
+            {
+                var messageText = mEtxtMessage.Text.ToString();
+                try
+                {
+                    var message = await SendUserMessageAsync(messageText);
+                    mAdapter.AddMessage(message);
+                    mAdapter.NotifyDataSetChanged();
+                    mEtxtMessage.Text = string.Empty;
+                }catch(Exception e)
+                {
+                    Console.WriteLine("Error Sending Text  -  " + e.Message);
+                }
+                
+            }
+
+            private async Task UploadAsync(Android.Net.Uri uri)
+            {
+                var channel = await GetChannelAsync();
+
+                try
+                {
+                    // The projection contains the columns we want to return in our query.
+                    string[] projection = new[] {
+                        Android.Provider.MediaStore.Images.Media.InterfaceConsts.Data,
+                        Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType,
+                        Android.Provider.MediaStore.Images.Media.InterfaceConsts.Size
+                    };
+                    using (ICursor cursor = this.Activity.ContentResolver.Query(uri, projection, null, null, null))
+                    {
+                        if (cursor != null)
+                        {
+                            cursor.MoveToFirst();
+                            string path = cursor.GetString(cursor.GetColumnIndexOrThrow(Android.Provider.MediaStore.Images.Media.InterfaceConsts.Data));
+                            string mime = cursor.GetString(cursor.GetColumnIndexOrThrow(Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType));
+                            int size = cursor.GetInt(cursor.GetColumnIndexOrThrow(Android.Provider.MediaStore.Images.Media.InterfaceConsts.Size));
+                            cursor.Close();
+
+                            if (path == null)
+                            {
+                                Toast.MakeText(this.Activity, "Uploading file must be located in local storage.", ToastLength.Long).Show();
+                            }
+                            else
+                            {
+
+                                var file = new SBFile(path);
+                                channel.SendFileMessage(file, "filename.ext", mime, size, null, null, (FileMessage fileMessage, SendBirdException e) =>
+                                {
+                                    if (e != null)
+                                    {
+                                        // Error.
+                                        return;
+                                    }
+                                });
+
+                                //                        SendBirdClient.UploadFile(path, mime, size, "", new SendBirdFileUploadEventHandler(
+                                //	(sender, e) => {
+                                //		if(e.Exception != null) {
+                                //			Console.WriteLine(e.Exception.StackTrace);
+                                //			Toast.MakeText(this.Activity, "Fail to upload the file.", ToastLength.Long).Show();
+                                //		}
+
+                                //		SendBirdClient.SendFile(e.FileInfo);
+                                //	}
+                                //));
+                            }
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e.StackTrace);
+                    Toast.MakeText(this.Activity, "Fail to upload the file.", ToastLength.Long).Show();
+                }
+            }
+
+            public override void OnActivityResult(int requestCode, int resultCode, Intent data)
 			{
 				base.OnActivityResult(requestCode, resultCode, data);
 				if (resultCode == (int)Android.App.Result.Ok) {
 					if (requestCode == REQUEST_PICK_IMAGE && data != null && data.Data != null) {
-						Upload(data.Data);
+						UploadAsync(data.Data);
 					}
-				}
-			}
-
-			private void Upload(Android.Net.Uri uri)
-			{
-				try {
-					// The projection contains the columns we want to return in our query.
-					string[] projection = new[] { 
-						Android.Provider.MediaStore.Images.Media.InterfaceConsts.Data,
-						Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType,
-						Android.Provider.MediaStore.Images.Media.InterfaceConsts.Size
-					};
-					using (ICursor cursor = this.Activity.ContentResolver.Query(uri, projection, null, null, null))
-					{
-						if (cursor != null)
-						{
-							cursor.MoveToFirst();
-							string path = cursor.GetString(cursor.GetColumnIndexOrThrow(Android.Provider.MediaStore.Images.Media.InterfaceConsts.Data));
-							string mime = cursor.GetString(cursor.GetColumnIndexOrThrow(Android.Provider.MediaStore.Images.Media.InterfaceConsts.MimeType));
-							int size = cursor.GetInt(cursor.GetColumnIndexOrThrow(Android.Provider.MediaStore.Images.Media.InterfaceConsts.Size));
-							cursor.Close();
-
-							if(path == null) {
-								Toast.MakeText(this.Activity, "Uploading file must be located in local storage.", ToastLength.Long).Show();
-							} else {
-								SendBirdSDK.UploadFile(path, mime, size, "", new SendBirdFileUploadEventHandler(
-									(sender, e) => {
-										if(e.Exception != null) {
-											Console.WriteLine(e.Exception.StackTrace);
-											Toast.MakeText(this.Activity, "Fail to upload the file.", ToastLength.Long).Show();
-										}
-
-										SendBirdSDK.SendFile(e.FileInfo);
-									}
-								));
-							}
-						}
-					}
-				} catch (Exception e) {
-					Console.WriteLine(e.StackTrace);
-					Toast.MakeText(this.Activity, "Fail to upload the file.", ToastLength.Long).Show();
 				}
 			}
 
@@ -447,7 +612,7 @@ namespace SendBirdSample.Droid
 			}
 		}
 
-		public class SendBirdChatAdapter : BaseAdapter<Object>
+		public class SendBirdChatAdapter : BaseAdapter<BaseMessage>
 		{
 			private const int TYPE_UNSUPPORTED = 0;
 			private const int TYPE_MESSAGE = 1;
@@ -457,7 +622,7 @@ namespace SendBirdSample.Droid
 
 			private Context mContext;
 			private LayoutInflater mInflater;
-			private List<Object> mItemList;
+			private List<BaseMessage> mItemList;
 
 			internal long mMaxMessageTimestamp = long.MinValue;
 			public long GetMaxMessageTimestamp()
@@ -475,7 +640,7 @@ namespace SendBirdSample.Droid
 			{
 				mContext = context;
 				mInflater = mContext.GetSystemService (Context.LayoutInflaterService) as LayoutInflater;
-				mItemList = new List<Object> ();
+				mItemList = new List<BaseMessage> ();
 			}
 
 			#region implemented abstract members of BaseAdapter
@@ -491,7 +656,7 @@ namespace SendBirdSample.Droid
 				}
 			}
 
-			public override Object this [int index] {
+			public override BaseMessage this [int index] {
 				get {
 					return mItemList [index];
 				}
@@ -504,37 +669,39 @@ namespace SendBirdSample.Droid
 				mItemList.Clear ();
 			}
 
-			public void AddMessageModel (MessageModel model)
+            public void AddPreviousMessages(List<BaseMessage> prevMessages)
+            {
+                prevMessages.AddRange(mItemList);
+                mItemList = prevMessages;
+            }
+
+			public void AddMessage (BaseMessage message)
 			{
-                if (model == null)
+                if (message == null)
+                {
                     return;
-                
-				if (model.IsPast ()) {
-					mItemList.Insert (0, model);
-				} else {
-					mItemList.Add (model);
-				}
-				UpdateMessageTimestamp (model);
+                }
+				mItemList.Add (message);
+				UpdateMessageTimestamp (message);
+
 			}
 
-			private void UpdateMessageTimestamp (MessageModel model)
+			private void UpdateMessageTimestamp (BaseMessage message)
 			{
-				mMaxMessageTimestamp = mMaxMessageTimestamp < model.messageTimestamp ? model.messageTimestamp : mMaxMessageTimestamp;
-				mMinMessageTimestamp = mMinMessageTimestamp > model.messageTimestamp ? model.messageTimestamp : mMinMessageTimestamp;
+				mMaxMessageTimestamp = mMaxMessageTimestamp < message.CreatedAt ? message.CreatedAt : mMaxMessageTimestamp;
+				mMinMessageTimestamp = mMinMessageTimestamp > message.CreatedAt ? message.CreatedAt : mMinMessageTimestamp;
 			}
 
 			public override int GetItemViewType (int position)
 			{
-				Object item = mItemList [position];
-				if (item is SendBird.Model.Message) {
+				BaseMessage item = mItemList [position];
+				if (item is UserMessage) {
 					return TYPE_MESSAGE;
-				} else if (item is SendBird.Model.FileLink) {
+				} else if (item is FileMessage) {
 					return TYPE_FILELINK;
-				} else if (item is SendBird.Model.SystemMessage) {
+				} else if (item is AdminMessage) {
 					return TYPE_SYSTEM_MESSAGE;
-				} else if (item is SendBird.Model.BroadcastMessage) {
-					return TYPE_BROADCAST_MESSAGE;
-				}
+				} 
 
 				return TYPE_UNSUPPORTED;
 			}
@@ -542,7 +709,7 @@ namespace SendBirdSample.Droid
 			public override View GetView (int position, View convertView, ViewGroup parent)
 			{
 				ViewHolder viewHolder = null;
-				Object item = this [position];
+				BaseMessage item = this [position];
 
 				if (convertView == null || (convertView.Tag as ViewHolder).GetViewType () != GetItemViewType (position)) {
 					viewHolder = new ViewHolder ();
@@ -606,19 +773,19 @@ namespace SendBirdSample.Droid
 					break;
 				case TYPE_MESSAGE:
 					{
-						SendBird.Model.Message message = item as SendBird.Model.Message;
+						var message = item as UserMessage;
 						viewHolder.GetView<ImageView> ("img_op_icon").Visibility = ViewStates.Gone;
 						var messageView = viewHolder.GetView<TextView> ("message");
-						messageView.TextFormatted = Html.FromHtml ("<font color='#824096'><b>" + message.GetSenderName () + "</b></font>: " + message.message);
+						messageView.TextFormatted = Html.FromHtml ("<font color='#824096'><b>" + message.Sender.Nickname + "</b></font>: " + message.Message);
 						if (!messageView.HasOnClickListeners) {
 							// To prevent mutiple click listners
 							messageView.Click += (sender, e) => {
 								var builder = new Android.App.AlertDialog.Builder (mContext);
 								builder.SetTitle ("SENDBIRD");
-								builder.SetMessage("Do you want to start 1:1 messaging with " + message.GetSenderName() + "?");
+								builder.SetMessage("Do you want to start 1:1 messaging with " + message.Sender.Nickname + "?");
 								builder.SetPositiveButton ("OK", (s, ev) => {
 									Intent data = new Intent();
-									data.PutExtra("userIds", new string[]{message.GetSenderId()});
+									data.PutExtra("userIds", new string[]{message.Sender.UserId});
 									((SendBirdChatActivity)mContext).SetResult(Android.App.Result.Ok, data);
 									((SendBirdChatActivity)mContext).mDoNotDisconnect = true;
 									((SendBirdChatActivity)mContext).Finish();
@@ -633,49 +800,50 @@ namespace SendBirdSample.Droid
 					}
 				case TYPE_SYSTEM_MESSAGE:
 					{
-						SendBird.Model.SystemMessage systemMessage = item as SendBird.Model.SystemMessage;
-						viewHolder.GetView<TextView> ("message").TextFormatted = Html.FromHtml (systemMessage.message);
+						AdminMessage systemMessage = item as AdminMessage;
+						viewHolder.GetView<TextView> ("message").TextFormatted = Html.FromHtml (systemMessage.Message);
 						break;
 					}
-				case TYPE_BROADCAST_MESSAGE:
-					{
-						SendBird.Model.BroadcastMessage broadcastMessage = item as SendBird.Model.BroadcastMessage;
-						viewHolder.GetView<TextView> ("message").TextFormatted = Html.FromHtml (broadcastMessage.message);
-						break;
-					}
+				//case TYPE_BROADCAST_MESSAGE:
+				//	{
+				//		SendBird.Model.BroadcastMessage broadcastMessage = item as SendBird.Model.BroadcastMessage;
+				//		viewHolder.GetView<TextView> ("message").TextFormatted = Html.FromHtml (broadcastMessage.message);
+				//		break;
+				//	}
 				case TYPE_FILELINK:
 					{
-						FileLink fileLink = item as FileLink;
-						if(fileLink.isOpMessage) {
-							viewHolder.GetView<ImageView> ("img_op_icon").Visibility = ViewStates.Visible;
-							viewHolder.GetView<TextView> ("txt_sender_name").TextFormatted = Html.FromHtml("&nbsp;&nbsp;&nbsp;<font color='#824096'><b>" + fileLink.GetSenderName() + "</b></font>: ");
-						} else {
-							viewHolder.GetView<ImageView> ("img_op_icon").Visibility = ViewStates.Gone;
-							viewHolder.GetView<TextView>("txt_sender_name").TextFormatted = Html.FromHtml("<font color='#824096'><b>" + fileLink.GetSenderName() + "</b></font>: ");
-						}
-						if(fileLink.fileInfo.type.ToLower().StartsWith("image")) {
+						FileMessage fileLink = item as FileMessage;
+                           //fix this 
+						//if(fileLink.IsOpenChannel() ){
+						//	viewHolder.GetView<ImageView> ("img_op_icon").Visibility = ViewStates.Visible;
+						//	viewHolder.GetView<TextView> ("txt_sender_name").TextFormatted = Html.FromHtml("&nbsp;&nbsp;&nbsp;<font color='#824096'><b>" + fileLink.GetSenderName() + "</b></font>: ");
+						//} else {
+						//	viewHolder.GetView<ImageView> ("img_op_icon").Visibility = ViewStates.Gone;
+						//	viewHolder.GetView<TextView>("txt_sender_name").TextFormatted = Html.FromHtml("<font color='#824096'><b>" + fileLink.GetSenderName() + "</b></font>: ");
+						//}
+						if(fileLink.Type.ToLower().StartsWith("image")) {
 							viewHolder.GetView("file_container").Visibility = ViewStates.Gone;
 
 							viewHolder.GetView("image_container").Visibility = ViewStates.Visible;
-							viewHolder.GetView<TextView>("txt_image_name").Text = fileLink.fileInfo.name;
-							viewHolder.GetView<TextView>("txt_image_size").Text = fileLink.fileInfo.size.ToString();
-							if (fileLink.fileInfo.url != null && fileLink.fileInfo.url != "null") {
-								DisplayUrlImage (viewHolder.GetView<ImageView> ("img_thumbnail"), fileLink.fileInfo.url);
+							viewHolder.GetView<TextView>("txt_image_name").Text = fileLink.Name;
+							viewHolder.GetView<TextView>("txt_image_size").Text = fileLink.Size.ToString();
+							if (fileLink.Url != null && fileLink.Url != "null") {
+								DisplayUrlImage (viewHolder.GetView<ImageView> ("img_thumbnail"), fileLink.Url);
 							}
 						} else {
 							viewHolder.GetView("image_container").Visibility = ViewStates.Gone;
 
 							viewHolder.GetView("file_container").Visibility = ViewStates.Visible;
-							viewHolder.GetView<TextView>("txt_file_name").Text = fileLink.fileInfo.name;
-							viewHolder.GetView<TextView>("txt_file_size").Text = "" + fileLink.fileInfo.size.ToString();
+							viewHolder.GetView<TextView>("txt_file_name").Text = fileLink.Name;
+							viewHolder.GetView<TextView>("txt_file_size").Text = "" + fileLink.Size.ToString();
 						}
 						viewHolder.GetView("txt_sender_name").Click += (sender, e) => {
 							var builder = new Android.App.AlertDialog.Builder (mContext);
 							builder.SetTitle ("SENDBIRD");
-							builder.SetMessage("Do you want to start 1:1 messaging with " + fileLink.GetSenderName() + "?");
+							builder.SetMessage("Do you want to start 1:1 messaging with " + fileLink.Sender.Nickname + "?");
 							builder.SetPositiveButton ("OK", (s, ev) => {
 								Intent data = new Intent();
-								data.PutExtra("userIds", new string[]{fileLink.GetSenderId()});
+								data.PutExtra("userIds", new string[]{fileLink.Sender.UserId});
 								((SendBirdChatActivity)mContext).SetResult(Android.App.Result.Ok, data);
 								((SendBirdChatActivity)mContext).mDoNotDisconnect = true;
 								((SendBirdChatActivity)mContext).Finish();
@@ -692,7 +860,13 @@ namespace SendBirdSample.Droid
 				return convertView;
 			}
 
-			private class ViewHolder : Java.Lang.Object
+            internal void DeleteMessage(BaseChannel baseChannel, long messageId)
+            {
+                //TODO Implement
+                //throw new NotImplementedException();
+            }
+
+            private class ViewHolder : Java.Lang.Object
 			{
 				private Dictionary<string, View> holder = new Dictionary<string, View> ();
 				private int type;

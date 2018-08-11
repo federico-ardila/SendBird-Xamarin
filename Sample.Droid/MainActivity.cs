@@ -30,13 +30,11 @@ namespace SendBirdSample.Droid
 
 		private const int REQUEST_SENDBIRD_MEMBER_LIST_ACTIVITY = 300;
 
-		string appId = "A7A2672C-AD11-11E4-8DAA-0A18B21C2D82";
-
-		private static string userId = GenerateDeviceUUID ();
-
-		private static string userName = "User-" + userId.Substring(0, 5);
-
-		string channelUrl = "lobby";
+		string appId = "YOur APP ID";
+        private static string userId = "UserId";
+        private static string accessToken = "accesstoken";
+        private static string userName = "Username";
+        string channelUrl = "channelUrl";
 
 		protected override void OnCreate (Bundle savedInstanceState)
 		{
@@ -50,78 +48,78 @@ namespace SendBirdSample.Droid
 			FindViewById (Resource.Id.btn_start_chat).Click += delegate {
 				StartChat (channelUrl);
 			};
-			FindViewById (Resource.Id.btn_start_channel_list).Click += delegate {
-				StartChannelList ();
-			};
-			FindViewById (Resource.Id.btn_start_messaging).Click += delegate {
-				StartMemberList ();
-			};
-			FindViewById (Resource.Id.btn_start_messaging_channel_list).Click += delegate {
-				StartMessagingChannelList ();
-			};
+			//FindViewById (Resource.Id.btn_start_channel_list).Click += delegate {
+			//	StartChannelList ();
+			//};
+			//FindViewById (Resource.Id.btn_start_messaging).Click += delegate {
+			//	StartMemberList ();
+			//};
+			//FindViewById (Resource.Id.btn_start_messaging_channel_list).Click += delegate {
+			//	StartMessagingChannelList ();
+			//};
 		}
 
 		internal void StartChat (string channelUrl)
 		{
 			var intent = new Intent (this, typeof(SendBirdChatActivity));
-			Bundle args = SendBirdChatActivity.MakeSendBirdArgs (appId, userId, userName, channelUrl);
+			Bundle args = SendBirdChatActivity.MakeSendBirdArgs (appId, userId, userName, channelUrl, accessToken);
 			intent.PutExtras (args);
 			StartActivityForResult (intent, REQUEST_SENDBIRD_CHAT_ACTIVITY);
 		}
 
-		internal void StartChannelList ()
-		{
-			var intent = new Intent (this, typeof(SendBirdChannelListActivity));
-			Bundle args = SendBirdChannelListActivity.MakeSendBirdArgs (appId, userId, userName, channelUrl);
-			intent.PutExtras (args);
-			StartActivityForResult (intent, REQUEST_SENDBIRD_CHANNEL_LIST_ACTIVITY);
-		}
+		//internal void StartChannelList ()
+		//{
+		//	var intent = new Intent (this, typeof(SendBirdChannelListActivity));
+		//	Bundle args = SendBirdChannelListActivity.MakeSendBirdArgs (appId, userId, userName, channelUrl);
+		//	intent.PutExtras (args);
+		//	StartActivityForResult (intent, REQUEST_SENDBIRD_CHANNEL_LIST_ACTIVITY);
+		//}
 
-		internal void StartMemberList ()
-		{
-			var intent = new Intent (this, typeof(SendBirdMemberListActivity));
-			Bundle args = SendBirdMemberListActivity.MakeSendBirdArgs (appId, userId, userName);
-			intent.PutExtras (args);
-			StartActivityForResult (intent, REQUEST_SENDBIRD_MEMBER_LIST_ACTIVITY);
-		}
+		//internal void StartMemberList ()
+		//{
+		//	var intent = new Intent (this, typeof(SendBirdMemberListActivity));
+		//	Bundle args = SendBirdMemberListActivity.MakeSendBirdArgs (appId, userId, userName);
+		//	intent.PutExtras (args);
+		//	StartActivityForResult (intent, REQUEST_SENDBIRD_MEMBER_LIST_ACTIVITY);
+		//}
 
-		internal void StartMessaging (string[] targetUserIds)
-		{
-			var intent = new Intent (this, typeof(SendBirdMessagingActivity));
-			Bundle args = SendBirdMessagingActivity.MakeMessagingStartArgs (appId, userId, userName, targetUserIds);
-			intent.PutExtras (args);
-			StartActivityForResult (intent, REQUEST_SENDBIRD_MESSAGING_ACTIVITY);
-		}
+		//internal void StartMessaging (string[] targetUserIds)
+		//{
+		//	var intent = new Intent (this, typeof(SendBirdMessagingActivity));
+		//	Bundle args = SendBirdMessagingActivity.MakeMessagingStartArgs (appId, userId, userName, targetUserIds);
+		//	intent.PutExtras (args);
+		//	StartActivityForResult (intent, REQUEST_SENDBIRD_MESSAGING_ACTIVITY);
+		//}
 
-		internal void JoinMessaging (string channelUrl)
-		{
-			var intent = new Intent (this, typeof(SendBirdMessagingActivity));
-			Bundle args = SendBirdMessagingActivity.MakeMessagingJoinArgs (appId, userId, userName, channelUrl);
-			intent.PutExtras (args);
-			StartActivityForResult (intent, REQUEST_SENDBIRD_MESSAGING_ACTIVITY);
-		}
+		//internal void JoinMessaging (string channelUrl)
+		//{
+		//	var intent = new Intent (this, typeof(SendBirdMessagingActivity));
+		//	Bundle args = SendBirdMessagingActivity.MakeMessagingJoinArgs (appId, userId, userName, channelUrl);
+		//	intent.PutExtras (args);
+		//	StartActivityForResult (intent, REQUEST_SENDBIRD_MESSAGING_ACTIVITY);
+		//}
 
-		internal void StartMessagingChannelList ()
-		{
-			var intent = new Intent (this, typeof(SendBirdMessagingChannelListActivity));
-			Bundle args = SendBirdMessagingChannelListActivity.MakeSendBirdArgs (appId, userId, userName);
-			intent.PutExtras (args);
-			StartActivityForResult (intent, REQUEST_SENDBIRD_MESSAGING_CHANNEL_LIST_ACTIVITY);
-		}
+		//internal void StartMessagingChannelList ()
+		//{
+		//	var intent = new Intent (this, typeof(SendBirdMessagingChannelListActivity));
+		//	Bundle args = SendBirdMessagingChannelListActivity.MakeSendBirdArgs (appId, userId, userName);
+		//	intent.PutExtras (args);
+		//	StartActivityForResult (intent, REQUEST_SENDBIRD_MESSAGING_CHANNEL_LIST_ACTIVITY);
+		//}
 
 		protected override void OnActivityResult (int requestCode, Result resultCode, Intent data)
 		{
 			base.OnActivityResult (requestCode, resultCode, data);
 
-			if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_MESSAGING_CHANNEL_LIST_ACTIVITY && data != null) {
-				JoinMessaging (data.GetStringExtra ("channelUrl"));
-			}
-			if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_MEMBER_LIST_ACTIVITY && data != null) {
-				StartMessaging (data.GetStringArrayExtra ("userIds"));
-			}
-			if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_CHAT_ACTIVITY && data != null) {
-				StartMessaging (data.GetStringArrayExtra ("userIds"));
-			}
+			//if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_MESSAGING_CHANNEL_LIST_ACTIVITY && data != null) {
+			//	JoinMessaging (data.GetStringExtra ("channelUrl"));
+			//}
+			//if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_MEMBER_LIST_ACTIVITY && data != null) {
+			//	StartMessaging (data.GetStringArrayExtra ("userIds"));
+			//}
+			//if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_CHAT_ACTIVITY && data != null) {
+			//	StartMessaging (data.GetStringArrayExtra ("userIds"));
+			//}
 			if (resultCode == Result.Ok && requestCode == REQUEST_SENDBIRD_CHANNEL_LIST_ACTIVITY && data != null) {
 				StartChat (data.GetStringExtra ("channelUrl"));
 			}

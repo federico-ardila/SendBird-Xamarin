@@ -33,11 +33,11 @@
         android:layout_centerHorizontal="true"
         android:minWidth="220dp"
         android:layout_height="wrap_content"
-        android:text="Join Lobby Channel"
+        android:text="Join Rootlo Channel"
         android:textColor="#ffffff"
         android:background="#824096"
         android:gravity="center" />
-    <Button
+<!--<Button
         android:layout_below="@+id/btn_start_chat"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="10dp"
@@ -72,5 +72,5 @@
         android:text="Messaging Channel List"
         android:textColor="#ffffff"
         android:background="#824096"
-        android:gravity="center" />
+        android:gravity="center" />-->
 </RelativeLayout>
