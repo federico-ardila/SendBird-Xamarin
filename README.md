@@ -10,13 +10,12 @@ This also shows how to wrap the callbacks oriented SDK into async methods allowi
 3. Exception handling with try catch blocks
 4. No need to use SynchronizationContext for UI changes (except in delegate method in the ChannelHandler)
 
-It shouldn't be too dificult to create helper clases to wrap basically the whole SDK into async methods. I might end up doing that just so I don't have to write ad-hoc methods if I create a iOS version of my App.
+It shouldn't be too dificult to create helper clases to wrap basically the whole SDK into async methods. I might end up doing that just so I don't have to keep writing  ad-hoc methods if I create an iOS version of the App I'm currently working on.
 
 ## Quick Start
-0. Create a SendBird Account a user (or 2 if you want to actually test the chat) and and open channel
+0. Create a SendBird Account a Aser (or 2 if you want to actually test the chat) and an Open Channel
 1. Download Sample UI project from this repository.
 2. Set the values for AppId UserId Accesstoken and ChannelUrl in Main
-2. Open the project which you want to run.(We currently provide Android only)
 3. Build and run it.
 
 
