@@ -13,7 +13,7 @@ This also shows how to wrap the callbacks oriented SDK into async methods allowi
 It shouldn't be too dificult to create helper clases to wrap basically the whole SDK into async methods. I might end up doing that just so I don't have to keep writing  ad-hoc methods if I create an iOS version of the App I'm currently working on.
 
 ## Quick Start
-0. Create a SendBird Account a Aser (or 2 if you want to actually test the chat) and an Open Channel
+0. Create a SendBird Account a User (or 2 if you want to actually test the chat) and an Open Channel
 1. Download Sample UI project from this repository.
 2. Set the values for AppId UserId Accesstoken and ChannelUrl in Main
 3. Build and run it.
@@ -21,4 +21,3 @@ It shouldn't be too dificult to create helper clases to wrap basically the whole
 
 If someone shows interest I might clean this up finish it and create a pull request. But for now this was all I needed to learn the SDK and evaluate SendBird for my needs. 
 
-Ok enough talking to myself. 
